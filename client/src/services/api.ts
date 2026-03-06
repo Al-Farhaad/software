@@ -157,15 +157,24 @@ export const investmentApi = {
 };
 
 export const systemApi = {
-  async deleteAllData() {
+  async deleteAllData(passcode: string) {
     try {
+      const tokenResponse = await api.post<ApiResponse<{ token: string }>>("/auth/token", {
+        passcode,
+      });
+      const token = tokenResponse.data.data.token;
+
       const response = await api.delete<
         ApiResponse<{
           donationsDeleted: number;
           investmentsDeleted: number;
           contributorsDeleted: number;
         }>
-      >("/system/data");
+      >("/system/data", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       return response.data.data;
     } catch (error) {
       throw new Error(mapErrorMessage(error));

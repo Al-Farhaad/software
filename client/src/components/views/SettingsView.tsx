@@ -200,10 +200,15 @@ export const SettingsView = ({
       return;
     }
 
+    const passcode = window.prompt("Enter admin passcode to delete all data:");
+    if (!passcode) {
+      return;
+    }
+
     try {
       setDeletingData(true);
       setDataMessage(null);
-      const deleted = await systemApi.deleteAllData();
+      const deleted = await systemApi.deleteAllData(passcode);
       await onRefreshAll();
       setDataMessageType("success");
       setDataMessage(
