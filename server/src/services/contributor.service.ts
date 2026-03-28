@@ -1,6 +1,7 @@
 import { Contributor } from "../models/contributor.model";
 import { HttpError } from "../utils/http-error";
 import { buildSearchPattern } from "../utils/search";
+import type { AuthTokenPayload } from "../utils/jwt";
 
 interface ContributorFilters {
   search?: string;
@@ -21,6 +22,9 @@ export interface UpdateContributorInput {
 }
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+const ownerFilter = (auth: AuthTokenPayload): Record<string, string> =>
+  auth.role === "superadmin" ? {} : { ownerId: auth.userId };
 
 const normalizeOptionalValue = (value?: string) => {
   const normalized = value?.trim();
@@ -46,19 +50,20 @@ const generateUniqueContributorId = async () => {
   throw new HttpError(500, "Could not generate unique contributor ID.");
 };
 
-export const createContributor = async (payload: CreateContributorInput) => {
+export const createContributor = async (payload: CreateContributorInput, auth: AuthTokenPayload) => {
   const contributorId = await generateUniqueContributorId();
   return Contributor.create({
+    ownerId: auth.userId,
     contributorId,
     name: payload.name.trim(),
     phoneNo: normalizeOptionalValue(payload.phoneNo),
     email: normalizeOptionalValue(payload.email),
     address: normalizeOptionalValue(payload.address),
-  });
+  } as Record<string, unknown>);
 };
 
-export const listContributors = async (filters: ContributorFilters) => {
-  const query: Record<string, unknown> = {};
+export const listContributors = async (filters: ContributorFilters, auth: AuthTokenPayload) => {
+  const query: Record<string, unknown> = ownerFilter(auth);
   const pattern = buildSearchPattern(filters.search);
   if (pattern) {
     query.$or = [
@@ -71,7 +76,11 @@ export const listContributors = async (filters: ContributorFilters) => {
   return Contributor.find(query).sort({ createdAt: -1 }).lean();
 };
 
-export const updateContributorById = async (id: string, payload: UpdateContributorInput) => {
+export const updateContributorById = async (
+  id: string,
+  payload: UpdateContributorInput,
+  auth: AuthTokenPayload,
+) => {
   const setPayload: Record<string, string> = {};
   const unsetPayload: Record<string, 1> = {};
 
@@ -114,7 +123,8 @@ export const updateContributorById = async (id: string, payload: UpdateContribut
     updatePayload.$unset = unsetPayload;
   }
 
-  const contributor = await Contributor.findByIdAndUpdate(id, updatePayload, {
+  const query = { _id: id, ...ownerFilter(auth) } as Record<string, unknown>;
+  const contributor = await Contributor.findOneAndUpdate(query, updatePayload, {
     new: true,
     runValidators: true,
   }).lean();
@@ -126,8 +136,9 @@ export const updateContributorById = async (id: string, payload: UpdateContribut
   return contributor;
 };
 
-export const deleteContributorById = async (id: string) => {
-  const contributor = await Contributor.findByIdAndDelete(id).lean();
+export const deleteContributorById = async (id: string, auth: AuthTokenPayload) => {
+  const query = { _id: id, ...ownerFilter(auth) } as Record<string, unknown>;
+  const contributor = await Contributor.findOneAndDelete(query).lean();
 
   if (!contributor) {
     throw new HttpError(404, "Contributor not found.");

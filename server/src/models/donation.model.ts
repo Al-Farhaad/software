@@ -2,6 +2,7 @@ import { Document, model, Schema } from "mongoose";
 import { CAMPAIGN_OPTIONS, PAYMENT_METHODS, PaymentMethod } from "../constants/donation-data";
 
 export interface DonationDocument extends Document {
+  ownerId?: Schema.Types.ObjectId;
   contributorId?: Schema.Types.ObjectId;
   donorName: string;
   donorEmail?: string;
@@ -18,6 +19,10 @@ export interface DonationDocument extends Document {
 
 const donationSchema = new Schema<DonationDocument>(
   {
+    ownerId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
     contributorId: {
       type: Schema.Types.ObjectId,
       ref: "Contributor",
@@ -77,6 +82,7 @@ const donationSchema = new Schema<DonationDocument>(
 donationSchema.index({ donationDate: -1 });
 donationSchema.index({ campaign: 1 });
 donationSchema.index({ contributorId: 1 });
+donationSchema.index({ ownerId: 1, donationDate: -1 });
 donationSchema.index({ donorName: "text", donorEmail: "text", donorPhone: "text", donorAddress: "text" });
 
 export const Donation = model<DonationDocument>("Donation", donationSchema);

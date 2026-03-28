@@ -6,6 +6,7 @@ import {
   listInvestments,
   updateInvestmentById,
 } from "../services/investment.service";
+import { getRequestAuth } from "../utils/request-auth";
 
 export const createInvestmentHandler = async (
   req: Request,
@@ -13,7 +14,7 @@ export const createInvestmentHandler = async (
   next: NextFunction,
 ) => {
   try {
-    const investment = await createInvestment(req.body);
+    const investment = await createInvestment(req.body, getRequestAuth(req));
     res.status(201).json({
       success: true,
       data: investment,
@@ -30,11 +31,12 @@ export const getInvestmentListHandler = async (
   next: NextFunction,
 ) => {
   try {
+    const auth = getRequestAuth(req);
     const [investments, totalInvested] = await Promise.all([
       listInvestments({
         search: req.query.search as string | undefined,
-      }),
-      getTotalInvestedAmount(),
+      }, auth),
+      getTotalInvestedAmount(auth),
     ]);
 
     res.json({
@@ -55,7 +57,7 @@ export const updateInvestmentHandler = async (
   next: NextFunction,
 ) => {
   try {
-    const investment = await updateInvestmentById(String(req.params.id), req.body);
+    const investment = await updateInvestmentById(String(req.params.id), req.body, getRequestAuth(req));
     res.json({
       success: true,
       data: investment,
@@ -72,7 +74,7 @@ export const deleteInvestmentHandler = async (
   next: NextFunction,
 ) => {
   try {
-    await deleteInvestmentById(String(req.params.id));
+    await deleteInvestmentById(String(req.params.id), getRequestAuth(req));
     res.json({
       success: true,
       message: "Investment deleted.",

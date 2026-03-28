@@ -5,6 +5,7 @@ import {
   listContributors,
   updateContributorById,
 } from "../services/contributor.service";
+import { getRequestAuth } from "../utils/request-auth";
 
 export const createContributorHandler = async (
   req: Request,
@@ -12,7 +13,7 @@ export const createContributorHandler = async (
   next: NextFunction,
 ) => {
   try {
-    const contributor = await createContributor(req.body);
+    const contributor = await createContributor(req.body, getRequestAuth(req));
     res.status(201).json({
       success: true,
       data: contributor,
@@ -31,7 +32,7 @@ export const getContributorListHandler = async (
   try {
     const contributors = await listContributors({
       search: req.query.search as string | undefined,
-    });
+    }, getRequestAuth(req));
     res.json({
       success: true,
       data: contributors,
@@ -47,7 +48,7 @@ export const updateContributorHandler = async (
   next: NextFunction,
 ) => {
   try {
-    const contributor = await updateContributorById(String(req.params.id), req.body);
+    const contributor = await updateContributorById(String(req.params.id), req.body, getRequestAuth(req));
     res.json({
       success: true,
       data: contributor,
@@ -64,7 +65,7 @@ export const deleteContributorHandler = async (
   next: NextFunction,
 ) => {
   try {
-    await deleteContributorById(String(req.params.id));
+    await deleteContributorById(String(req.params.id), getRequestAuth(req));
     res.json({
       success: true,
       message: "Contributor deleted.",

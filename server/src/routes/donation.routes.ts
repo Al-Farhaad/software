@@ -18,6 +18,8 @@ import {
 
 export const donationRouter = Router();
 
+donationRouter.use(requireAuth);
+
 donationRouter.get("/", donationFilterValidator, validateRequest, getDonationListHandler);
 donationRouter.get("/stats", getDonationStatsHandler);
 donationRouter.get("/:id", donationIdValidator, validateRequest, getDonationByIdHandler);
@@ -28,4 +30,4 @@ donationRouter.post(
   validateRequest,
   emailReceiptHandler,
 );
-donationRouter.delete("/:id", requireAuth, donationIdValidator, validateRequest, deleteDonationHandler);
+donationRouter.delete("/:id", donationIdValidator, validateRequest, deleteDonationHandler);

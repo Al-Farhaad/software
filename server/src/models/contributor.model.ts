@@ -1,6 +1,7 @@
 import { Document, model, Schema } from "mongoose";
 
 export interface ContributorDocument extends Document {
+  ownerId?: Schema.Types.ObjectId;
   contributorId: string;
   name: string;
   phoneNo?: string;
@@ -12,6 +13,10 @@ export interface ContributorDocument extends Document {
 
 const contributorSchema = new Schema<ContributorDocument>(
   {
+    ownerId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
     contributorId: {
       type: String,
       required: true,
@@ -51,6 +56,6 @@ const contributorSchema = new Schema<ContributorDocument>(
 );
 
 contributorSchema.index({ name: "text", phoneNo: "text", email: "text", contributorId: "text" });
-contributorSchema.index({ contributorId: 1 }, { unique: true });
+contributorSchema.index({ ownerId: 1, createdAt: -1 });
 
 export const Contributor = model<ContributorDocument>("Contributor", contributorSchema);

@@ -1,7 +1,10 @@
 import { Types } from "mongoose";
 import { PaymentMethod } from "../constants/donation-data";
+import { Contributor } from "../models/contributor.model";
 import { Donation } from "../models/donation.model";
+import type { AuthTokenPayload } from "../utils/jwt";
 import { buildSearchPattern, parseDateSafe } from "../utils/search";
+import { HttpError } from "../utils/http-error";
 
 interface DonationFilters {
   search?: string;
@@ -32,17 +35,23 @@ interface DonationStatsPayload {
   recentDonations: unknown[];
 }
 
-const STATS_CACHE_TTL_MS = 30_000;
-let statsCache: DonationStatsPayload | null = null;
-let statsCacheExpiresAt = 0;
+const ownerFilter = (auth: AuthTokenPayload): Record<string, string> =>
+  auth.role === "superadmin" ? {} : { ownerId: auth.userId };
 
-const invalidateDonationStatsCache = () => {
-  statsCache = null;
-  statsCacheExpiresAt = 0;
-};
+export const createDonation = async (payload: CreateDonationInput, auth: AuthTokenPayload) => {
+  if (payload.contributorId) {
+    const contributorQuery = {
+      _id: payload.contributorId,
+      ...ownerFilter(auth),
+    } as Record<string, unknown>;
+    const contributor = await Contributor.findOne(contributorQuery).lean();
+    if (!contributor) {
+      throw new HttpError(400, "Contributor not found for this account.");
+    }
+  }
 
-export const createDonation = async (payload: CreateDonationInput) => {
-  const donation = await Donation.create({
+  return Donation.create({
+    ownerId: auth.userId,
     contributorId: payload.contributorId ? new Types.ObjectId(payload.contributorId) : undefined,
     donorName: payload.donorName,
     donorEmail: payload.donorEmail,
@@ -54,19 +63,18 @@ export const createDonation = async (payload: CreateDonationInput) => {
     donationDate: payload.donationDate ? new Date(payload.donationDate) : undefined,
     notes: payload.notes,
   } as Record<string, unknown>);
-  invalidateDonationStatsCache();
-  return donation;
 };
 
-export const getDonationById = async (id: string) => {
+export const getDonationById = async (id: string, auth: AuthTokenPayload) => {
   if (!Types.ObjectId.isValid(id)) {
     return null;
   }
-  return Donation.findById(id).lean();
+  const query = { _id: id, ...ownerFilter(auth) } as Record<string, unknown>;
+  return Donation.findOne(query).lean();
 };
 
-export const listDonations = async (filters: DonationFilters) => {
-  const query: Record<string, unknown> = {};
+export const listDonations = async (filters: DonationFilters, auth: AuthTokenPayload) => {
+  const query: Record<string, unknown> = ownerFilter(auth);
 
   const pattern = buildSearchPattern(filters.search);
   if (pattern) {
@@ -95,27 +103,24 @@ export const listDonations = async (filters: DonationFilters) => {
   return Donation.find(query).sort({ donationDate: -1 }).lean();
 };
 
-export const deleteDonationById = async (id: string) => {
+export const deleteDonationById = async (id: string, auth: AuthTokenPayload) => {
   if (!Types.ObjectId.isValid(id)) {
     return null;
   }
-  const deleted = await Donation.findByIdAndDelete(id).lean();
-  if (deleted) {
-    invalidateDonationStatsCache();
-  }
-  return deleted;
+  const query = { _id: id, ...ownerFilter(auth) } as Record<string, unknown>;
+  return Donation.findOneAndDelete(query).lean();
 };
 
-export const getDonationStats = async () => {
-  if (statsCache && Date.now() < statsCacheExpiresAt) {
-    return statsCache;
-  }
+export const getDonationStats = async (auth: AuthTokenPayload) => {
+  const ownerMatch = ownerFilter(auth);
+  const ownerStages = Object.keys(ownerMatch).length ? [{ $match: ownerMatch }] : [];
 
   const [summary] = await Donation.aggregate<{
     totalAmount: number;
     totalDonations: number;
     averageDonation: number;
   }>([
+    ...ownerStages,
     {
       $group: {
         _id: null,
@@ -130,6 +135,7 @@ export const getDonationStats = async () => {
   const startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
   const monthlyRaw = await Donation.aggregate<{ key: string; total: number }>([
+    ...ownerStages,
     { $match: { donationDate: { $gte: startDate } } },
     {
       $group: {
@@ -167,6 +173,7 @@ export const getDonationStats = async () => {
   });
 
   const campaignTotals = await Donation.aggregate<{ campaign: string; total: number }>([
+    ...ownerStages,
     {
       $group: {
         _id: "$campaign",
@@ -183,18 +190,14 @@ export const getDonationStats = async () => {
     },
   ]);
 
-  const recentDonations = await Donation.find().sort({ donationDate: -1 }).limit(5).lean();
+  const recentDonations = await Donation.find(ownerMatch).sort({ donationDate: -1 }).limit(5).lean();
 
-  const payload: DonationStatsPayload = {
+  return {
     totalAmount: summary?.totalAmount ?? 0,
     totalDonations: summary?.totalDonations ?? 0,
     averageDonation: Math.round(summary?.averageDonation ?? 0),
     monthlyTotals,
     campaignTotals,
     recentDonations,
-  };
-  statsCache = payload;
-  statsCacheExpiresAt = Date.now() + STATS_CACHE_TTL_MS;
-
-  return payload;
+  } satisfies DonationStatsPayload;
 };

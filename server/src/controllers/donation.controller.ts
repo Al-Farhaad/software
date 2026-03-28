@@ -8,10 +8,11 @@ import {
   listDonations,
 } from "../services/donation.service";
 import { sendDonationReceiptEmail } from "../services/email.service";
+import { getRequestAuth } from "../utils/request-auth";
 
 export const createDonationHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const donation = await createDonation(req.body);
+    const donation = await createDonation(req.body, getRequestAuth(req));
     res.status(201).json({
       success: true,
       data: donation,
@@ -29,7 +30,7 @@ export const getDonationListHandler = async (req: Request, res: Response, next: 
       campaign: req.query.campaign as string | undefined,
       from: req.query.from as string | undefined,
       to: req.query.to as string | undefined,
-    });
+    }, getRequestAuth(req));
 
     res.json({
       success: true,
@@ -42,7 +43,7 @@ export const getDonationListHandler = async (req: Request, res: Response, next: 
 
 export const getDonationByIdHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const donation = await getDonationById(String(req.params.id));
+    const donation = await getDonationById(String(req.params.id), getRequestAuth(req));
     if (!donation) {
       throw new HttpError(404, "Donation not found.");
     }
@@ -56,9 +57,9 @@ export const getDonationByIdHandler = async (req: Request, res: Response, next: 
   }
 };
 
-export const getDonationStatsHandler = async (_req: Request, res: Response, next: NextFunction) => {
+export const getDonationStatsHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const stats = await getDonationStats();
+    const stats = await getDonationStats(getRequestAuth(req));
     res.json({
       success: true,
       data: stats,
@@ -70,7 +71,7 @@ export const getDonationStatsHandler = async (_req: Request, res: Response, next
 
 export const emailReceiptHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const donation = await getDonationById(String(req.params.id));
+    const donation = await getDonationById(String(req.params.id), getRequestAuth(req));
     if (!donation) {
       throw new HttpError(404, "Donation not found.");
     }
@@ -94,7 +95,7 @@ export const emailReceiptHandler = async (req: Request, res: Response, next: Nex
 
 export const deleteDonationHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const deleted = await deleteDonationById(String(req.params.id));
+    const deleted = await deleteDonationById(String(req.params.id), getRequestAuth(req));
     if (!deleted) {
       throw new HttpError(404, "Donation not found.");
     }

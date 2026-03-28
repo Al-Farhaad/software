@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import { verifyAuthToken } from "../utils/jwt";
 import { HttpError } from "../utils/http-error";
+import type { UserRole } from "../models/user.model";
 
 export const requireAuth = (req: Request, _res: Response, next: NextFunction) => {
   const authorization = req.headers.authorization;
@@ -12,3 +13,15 @@ export const requireAuth = (req: Request, _res: Response, next: NextFunction) =>
   req.auth = verifyAuthToken(token);
   return next();
 };
+
+export const requireRole =
+  (...allowedRoles: UserRole[]) =>
+  (req: Request, _res: Response, next: NextFunction) => {
+    if (!req.auth) {
+      return next(new HttpError(401, "Authorization token is required."));
+    }
+    if (!allowedRoles.includes(req.auth.role)) {
+      return next(new HttpError(403, "You are not allowed to perform this action."));
+    }
+    return next();
+  };

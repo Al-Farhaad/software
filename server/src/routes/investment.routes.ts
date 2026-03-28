@@ -12,8 +12,11 @@ import {
   investmentFilterValidator,
   updateInvestmentValidator,
 } from "../validators/investment.validator";
+import { requireAuth } from "../middlewares/auth.middleware";
 
 export const investmentRouter = Router();
+
+investmentRouter.use(requireAuth);
 
 investmentRouter.get("/", investmentFilterValidator, validateRequest, getInvestmentListHandler);
 investmentRouter.post("/", createInvestmentValidator, validateRequest, createInvestmentHandler);

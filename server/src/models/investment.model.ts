@@ -1,6 +1,7 @@
 import { Document, model, Schema } from "mongoose";
 
 export interface InvestmentDocument extends Document {
+  ownerId?: Schema.Types.ObjectId;
   nameWhereInvested: string;
   amountInvested: number;
   note?: string;
@@ -11,6 +12,10 @@ export interface InvestmentDocument extends Document {
 
 const investmentSchema = new Schema<InvestmentDocument>(
   {
+    ownerId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
     nameWhereInvested: {
       type: String,
       required: true,
@@ -40,5 +45,6 @@ const investmentSchema = new Schema<InvestmentDocument>(
 
 investmentSchema.index({ nameWhereInvested: "text", note: "text" });
 investmentSchema.index({ investedAt: -1 });
+investmentSchema.index({ ownerId: 1, investedAt: -1 });
 
 export const Investment = model<InvestmentDocument>("Investment", investmentSchema);
