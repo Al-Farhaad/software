@@ -1,4 +1,4 @@
-import { Download, Mail } from "lucide-react";
+import { Download, Mail, Printer } from "lucide-react";
 import type { Donation } from "../../types/donation";
 import { formatCurrency } from "../../utils/currency";
 import { formatDate } from "../../utils/date";
@@ -7,6 +7,7 @@ interface DonationTableProps {
   donations: Donation[];
   loading: boolean;
   activeReceiptId: string | null;
+  onPrintReceipt: (donation: Donation) => void;
   onDownloadReceipt: (donation: Donation) => void;
   onEmailReceipt: (donation: Donation) => void;
 }
@@ -15,6 +16,7 @@ export const DonationTable = ({
   donations,
   loading,
   activeReceiptId,
+  onPrintReceipt,
   onDownloadReceipt,
   onEmailReceipt,
 }: DonationTableProps) => {
@@ -54,6 +56,14 @@ export const DonationTable = ({
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                className="inline-flex items-center gap-1 rounded-md border border-[#ddd6f3] px-2.5 py-1.5 text-xs text-slate-600 hover:bg-[#f5f1fd]"
+                type="button"
+                onClick={() => onPrintReceipt(donation)}
+              >
+                <Printer size={14} />
+                Print
+              </button>
               <button
                 className="inline-flex items-center gap-1 rounded-md border border-[#ddd6f3] px-2.5 py-1.5 text-xs text-slate-600 hover:bg-[#f5f1fd]"
                 type="button"
@@ -105,6 +115,14 @@ export const DonationTable = ({
                 <td className="px-4 py-3">{donation.paymentMethod.replace("_", " ")}</td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
+                    <button
+                      className="inline-flex items-center gap-1 rounded-md border border-[#ddd6f3] px-2.5 py-1.5 text-xs text-slate-600 hover:bg-[#f5f1fd]"
+                      type="button"
+                      onClick={() => onPrintReceipt(donation)}
+                    >
+                      <Printer size={14} />
+                      Print
+                    </button>
                     <button
                       className="inline-flex items-center gap-1 rounded-md border border-[#ddd6f3] px-2.5 py-1.5 text-xs text-slate-600 hover:bg-[#f5f1fd]"
                       type="button"

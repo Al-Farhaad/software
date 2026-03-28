@@ -1,8 +1,16 @@
-import { useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { CircleAlert, Download, Shield, Trash2, Upload } from "lucide-react";
-import { APP_LOGIN_EMAIL, updateAppPassword } from "../../data/auth";
-import { contributorApi, donationApi, investmentApi, systemApi } from "../../services/api";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { CircleAlert, Download, Shield, Trash2, Upload, UserPlus } from "lucide-react";
+import {
+  adminApi,
+  authApi,
+  authStorage,
+  contributorApi,
+  donationApi,
+  investmentApi,
+  systemApi,
+} from "../../services/api";
 import { AnalyticsFilterBar } from "../common/AnalyticsFilterBar";
+import type { AuthUser } from "../../types/auth";
 import type { Contributor } from "../../types/contributor";
 import type { Donation } from "../../types/donation";
 import type { Investment } from "../../types/investment";
@@ -14,6 +22,7 @@ import {
 } from "../../utils/analytics-filter";
 
 interface SettingsViewProps {
+  currentUser: AuthUser;
   contributors: Contributor[];
   donations: Donation[];
   investments: Investment[];
@@ -21,6 +30,7 @@ interface SettingsViewProps {
 }
 
 type ImportType = "donations" | "investments" | "contributors";
+const MAX_SIGNATURE_SIZE_BYTES = 2 * 1024 * 1024;
 
 const csvCell = (value: unknown) => {
   const stringValue = String(value ?? "");
@@ -96,19 +106,49 @@ const normalizeImportTypeFromHeaders = (headers: string[]): ImportType | null =>
   return null;
 };
 
+const formatRole = (role: AuthUser["role"]) => (role === "superadmin" ? "Super Admin" : "Sub Admin");
+
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("Could not read selected image."));
+    };
+    reader.onerror = () => reject(new Error("Could not read selected image."));
+    reader.readAsDataURL(file);
+  });
+
 export const SettingsView = ({
+  currentUser,
   contributors,
   donations,
   investments,
   onRefreshAll,
 }: SettingsViewProps) => {
+  const isSuperAdmin = currentUser.role === "superadmin";
+
   const [dataMessage, setDataMessage] = useState<string | null>(null);
   const [dataMessageType, setDataMessageType] = useState<"success" | "error">("success");
-  const [securityMessage, setSecurityMessage] = useState<string | null>(null);
-  const [securityMessageType, setSecurityMessageType] = useState<"success" | "error">("success");
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const [adminMessage, setAdminMessage] = useState<string | null>(null);
+  const [adminMessageType, setAdminMessageType] = useState<"success" | "error">("success");
+  const [subAdmins, setSubAdmins] = useState<AuthUser[]>([]);
+  const [loadingSubAdmins, setLoadingSubAdmins] = useState(false);
+  const [creatingSubAdmin, setCreatingSubAdmin] = useState(false);
+  const [deletingSubAdminId, setDeletingSubAdminId] = useState<string | null>(null);
+  const [subAdminName, setSubAdminName] = useState("");
+  const [subAdminEmail, setSubAdminEmail] = useState("");
+  const [subAdminPassword, setSubAdminPassword] = useState("");
+  const [signaturePreview, setSignaturePreview] = useState(currentUser.signatureDataUrl ?? "");
+  const [signatureMessage, setSignatureMessage] = useState<string | null>(null);
+  const [signatureMessageType, setSignatureMessageType] = useState<"success" | "error">("success");
+  const [updatingSignature, setUpdatingSignature] = useState(false);
+  const signatureInputRef = useRef<HTMLInputElement | null>(null);
+
   const [importing, setImporting] = useState(false);
   const [deletingData, setDeletingData] = useState(false);
   const [filterType, setFilterType] = useState<AnalyticsFilterType>("monthly");
@@ -134,6 +174,151 @@ export const SettingsView = ({
     [investments, filterType, selectedDate],
   );
   const filterLabel = analyticsFilterLabel(filterType, selectedDate);
+
+  const loadSubAdmins = async () => {
+    if (!isSuperAdmin) {
+      return;
+    }
+    try {
+      setLoadingSubAdmins(true);
+      setAdminMessage(null);
+      const users = await adminApi.listSubAdmins();
+      setSubAdmins(users);
+    } catch (error) {
+      setAdminMessageType("error");
+      setAdminMessage(error instanceof Error ? error.message : "Failed to load sub-admins.");
+    } finally {
+      setLoadingSubAdmins(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadSubAdmins();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    setSignaturePreview(currentUser.signatureDataUrl ?? "");
+  }, [currentUser.signatureDataUrl]);
+
+  const handleCreateSubAdmin = async () => {
+    if (!subAdminName.trim() || !subAdminEmail.trim() || !subAdminPassword.trim()) {
+      setAdminMessageType("error");
+      setAdminMessage("Name, email and password are required.");
+      return;
+    }
+    if (subAdminPassword.trim().length < 6) {
+      setAdminMessageType("error");
+      setAdminMessage("Password must be at least 6 characters.");
+      return;
+    }
+
+    try {
+      setCreatingSubAdmin(true);
+      setAdminMessage(null);
+      const created = await adminApi.createSubAdmin({
+        name: subAdminName.trim(),
+        email: subAdminEmail.trim(),
+        password: subAdminPassword.trim(),
+      });
+      setSubAdminName("");
+      setSubAdminEmail("");
+      setSubAdminPassword("");
+      setAdminMessageType("success");
+      setAdminMessage(
+        `Sub-admin created: ${created.name} (${created.email}). Share these credentials securely.`,
+      );
+      await loadSubAdmins();
+    } catch (error) {
+      setAdminMessageType("error");
+      setAdminMessage(error instanceof Error ? error.message : "Failed to create sub-admin.");
+    } finally {
+      setCreatingSubAdmin(false);
+    }
+  };
+
+  const handleDeleteSubAdmin = async (subAdmin: AuthUser) => {
+    const confirmed = window.confirm(`Do you want to delete "${subAdmin.name}" sub admin?..`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingSubAdminId(subAdmin.id);
+      setAdminMessage(null);
+      await adminApi.deleteSubAdmin(subAdmin.id);
+      setAdminMessageType("success");
+      setAdminMessage(`Sub-admin deleted: ${subAdmin.name}.`);
+      await loadSubAdmins();
+    } catch (error) {
+      setAdminMessageType("error");
+      setAdminMessage(error instanceof Error ? error.message : "Failed to delete sub-admin.");
+    } finally {
+      setDeletingSubAdminId(null);
+    }
+  };
+
+  const updateStoredSessionUser = (updatedUser: AuthUser) => {
+    const session = authStorage.getSession();
+    if (!session) {
+      return;
+    }
+    authStorage.setSession({
+      token: session.token,
+      user: updatedUser,
+    });
+  };
+
+  const handleUploadSignature = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) {
+      return;
+    }
+
+    try {
+      setUpdatingSignature(true);
+      setSignatureMessage(null);
+
+      if (!selectedFile.type.startsWith("image/")) {
+        throw new Error("Please select an image file.");
+      }
+      if (selectedFile.size > MAX_SIGNATURE_SIZE_BYTES) {
+        throw new Error("Signature image must be 2MB or smaller.");
+      }
+
+      const signatureDataUrl = await readFileAsDataUrl(selectedFile);
+      const updatedUser = await authApi.updateSignature(signatureDataUrl);
+      setSignaturePreview(updatedUser.signatureDataUrl ?? "");
+      updateStoredSessionUser(updatedUser);
+      setSignatureMessageType("success");
+      setSignatureMessage("Signature uploaded. New receipts will use this receiver signature.");
+    } catch (error) {
+      setSignatureMessageType("error");
+      setSignatureMessage(error instanceof Error ? error.message : "Failed to upload signature.");
+    } finally {
+      setUpdatingSignature(false);
+      if (signatureInputRef.current) {
+        signatureInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleRemoveSignature = async () => {
+    try {
+      setUpdatingSignature(true);
+      setSignatureMessage(null);
+      const updatedUser = await authApi.updateSignature(undefined);
+      setSignaturePreview(updatedUser.signatureDataUrl ?? "");
+      updateStoredSessionUser(updatedUser);
+      setSignatureMessageType("success");
+      setSignatureMessage("Signature removed. Receipts will use the default signature image.");
+    } catch (error) {
+      setSignatureMessageType("error");
+      setSignatureMessage(error instanceof Error ? error.message : "Failed to remove signature.");
+    } finally {
+      setUpdatingSignature(false);
+    }
+  };
 
   const handleExportDonations = () => {
     const rows = filteredDonations.map((donation) => {
@@ -193,6 +378,12 @@ export const SettingsView = ({
   };
 
   const handleDeleteAllData = async () => {
+    if (!isSuperAdmin) {
+      setDataMessageType("error");
+      setDataMessage("Only super admin can delete all data.");
+      return;
+    }
+
     const confirmed = window.confirm(
       "Delete all contributors, donations, and investments? This action cannot be undone.",
     );
@@ -200,15 +391,10 @@ export const SettingsView = ({
       return;
     }
 
-    const passcode = window.prompt("Enter admin passcode to delete all data:");
-    if (!passcode) {
-      return;
-    }
-
     try {
       setDeletingData(true);
       setDataMessage(null);
-      const deleted = await systemApi.deleteAllData(passcode);
+      const deleted = await systemApi.deleteAllData();
       await onRefreshAll();
       setDataMessageType("success");
       setDataMessage(
@@ -261,9 +447,7 @@ export const SettingsView = ({
           | "upi"
           | "card"
           | "other",
-        donationDate: donation.donationDate
-          ? String(donation.donationDate)
-          : new Date().toISOString(),
+        donationDate: donation.donationDate ? String(donation.donationDate) : new Date().toISOString(),
         donorEmail: donation.donorEmail ? String(donation.donorEmail) : undefined,
         donorPhone: donation.donorPhone ? String(donation.donorPhone) : undefined,
         donorAddress: donation.donorAddress ? String(donation.donorAddress) : undefined,
@@ -388,45 +572,6 @@ export const SettingsView = ({
     }
   };
 
-  const handleUpdatePassword = (event: FormEvent) => {
-    event.preventDefault();
-    setSecurityMessage(null);
-
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      setSecurityMessageType("error");
-      setSecurityMessage("All password fields are required.");
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      setSecurityMessageType("error");
-      setSecurityMessage("New password must be at least 6 characters.");
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setSecurityMessageType("error");
-      setSecurityMessage("New password and confirm password do not match.");
-      return;
-    }
-
-    if (newPassword === currentPassword) {
-      setSecurityMessageType("error");
-      setSecurityMessage("New password should be different from current password.");
-      return;
-    }
-
-    const result = updateAppPassword(currentPassword, newPassword);
-    setSecurityMessageType(result.success ? "success" : "error");
-    setSecurityMessage(result.message);
-
-    if (result.success) {
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-    }
-  };
-
   return (
     <section className="space-y-5">
       <div className="tf-page-header">
@@ -437,55 +582,193 @@ export const SettingsView = ({
       <article className="tf-section-card">
         <h2 className="mb-1.5 flex items-center gap-2 text-xl font-bold leading-none text-[var(--tf-navy)]">
           <Shield size={18} />
-          Security
+          Account
         </h2>
-        <p className="mb-4 text-sm text-slate-500">Manage access and security settings</p>
+        <p className="mb-4 text-sm text-slate-500">Authenticated profile details</p>
 
-        <p className="mb-3 text-xs text-slate-500">Login email: {APP_LOGIN_EMAIL}</p>
+        <div className="grid gap-2 text-sm">
+          <p>
+            <span className="font-semibold text-slate-700">Name:</span> {currentUser.name}
+          </p>
+          <p>
+            <span className="font-semibold text-slate-700">Email:</span> {currentUser.email}
+          </p>
+          <p>
+            <span className="font-semibold text-slate-700">Role:</span> {formatRole(currentUser.role)}
+          </p>
+        </div>
+      </article>
 
-        <form className="grid gap-3" onSubmit={handleUpdatePassword}>
-          <label className="grid gap-1 text-sm text-[var(--tf-navy)]">
-            Current Password
-            <input
-              className="tf-input"
-              type="password"
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1 text-sm text-[var(--tf-navy)]">
-            New Password
-            <input
-              className="tf-input"
-              type="password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1 text-sm text-[var(--tf-navy)]">
-            Confirm Password
-            <input
-              className="tf-input"
-              type="password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-            />
-          </label>
-          <button className="tf-btn-outline mt-2" type="submit">
-            Update Password
+      <article className="tf-section-card">
+        <h2 className="mb-1.5 flex items-center gap-2 text-xl font-bold leading-none text-[var(--tf-navy)]">
+          <Upload size={18} />
+          Receipt Signature
+        </h2>
+        <p className="mb-4 text-sm text-slate-500">
+          Upload your receiver signature. When you create a donation receipt, this signature appears in
+          the receiver signature section.
+        </p>
+
+        <div className="flex flex-wrap gap-2.5">
+          <button
+            className="tf-btn-outline"
+            type="button"
+            onClick={() => signatureInputRef.current?.click()}
+            disabled={updatingSignature}
+          >
+            <Upload size={14} />
+            {updatingSignature ? "Saving..." : "Upload Signature"}
           </button>
-        </form>
+          <input
+            ref={signatureInputRef}
+            className="hidden"
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml"
+            onChange={(event) => void handleUploadSignature(event)}
+          />
+          {signaturePreview && (
+            <button
+              className="tf-btn-outline"
+              type="button"
+              onClick={() => void handleRemoveSignature()}
+              disabled={updatingSignature}
+            >
+              <Trash2 size={14} />
+              Remove Signature
+            </button>
+          )}
+        </div>
 
-        {securityMessage && (
+        <p className="mt-2 text-xs text-slate-500">Supported: PNG, JPG, WEBP, SVG. Max size: 2MB.</p>
+
+        {signaturePreview ? (
+          <div className="mt-4 rounded-xl border border-[var(--tf-border)] bg-white p-3">
+            <p className="mb-2 text-sm font-semibold text-slate-700">Current Signature Preview</p>
+            <img
+              src={signaturePreview}
+              alt="Current receiver signature"
+              className="h-20 max-w-full object-contain"
+            />
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-slate-500">No custom signature uploaded yet.</p>
+        )}
+
+        {signatureMessage && (
           <p
             className={`mt-3 text-sm ${
-              securityMessageType === "success" ? "text-emerald-600" : "text-rose-600"
+              signatureMessageType === "success" ? "text-emerald-600" : "text-rose-600"
             }`}
           >
-            {securityMessage}
+            {signatureMessage}
           </p>
         )}
       </article>
+
+      {isSuperAdmin && (
+        <article className="tf-section-card">
+          <h2 className="mb-1.5 flex items-center gap-2 text-xl font-bold leading-none text-[var(--tf-navy)]">
+            <UserPlus size={18} />
+            Sub Admin Management
+          </h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Create sub-admin credentials and share them securely.
+          </p>
+
+          <div className="grid gap-3">
+            <label className="grid gap-1 text-sm text-[var(--tf-navy)]">
+              Name
+              <input
+                className="tf-input"
+                type="text"
+                value={subAdminName}
+                onChange={(event) => setSubAdminName(event.target.value)}
+                disabled={creatingSubAdmin || loadingSubAdmins || deletingSubAdminId !== null}
+              />
+            </label>
+            <label className="grid gap-1 text-sm text-[var(--tf-navy)]">
+              Email
+              <input
+                className="tf-input"
+                type="email"
+                value={subAdminEmail}
+                onChange={(event) => setSubAdminEmail(event.target.value)}
+                disabled={creatingSubAdmin || loadingSubAdmins || deletingSubAdminId !== null}
+              />
+            </label>
+            <label className="grid gap-1 text-sm text-[var(--tf-navy)]">
+              Password
+              <input
+                className="tf-input"
+                type="password"
+                value={subAdminPassword}
+                onChange={(event) => setSubAdminPassword(event.target.value)}
+                disabled={creatingSubAdmin || loadingSubAdmins || deletingSubAdminId !== null}
+              />
+            </label>
+
+            <button
+              className="tf-btn-outline mt-1"
+              type="button"
+              onClick={() => void handleCreateSubAdmin()}
+              disabled={creatingSubAdmin || loadingSubAdmins || deletingSubAdminId !== null}
+            >
+              {creatingSubAdmin ? "Creating..." : "Create Sub Admin"}
+            </button>
+          </div>
+
+          {adminMessage && (
+            <p className={`mt-3 text-sm ${adminMessageType === "success" ? "text-emerald-600" : "text-rose-600"}`}>
+              {adminMessage}
+            </p>
+          )}
+
+          <div className="mt-5">
+            <h3 className="text-sm font-semibold text-slate-700">Existing Sub Admins</h3>
+            {loadingSubAdmins ? (
+              <p className="mt-2 text-sm text-slate-500">Loading sub-admins...</p>
+            ) : subAdmins.length ? (
+              <div className="mt-2 overflow-x-auto rounded-lg border border-[var(--tf-border)]">
+                <table className="min-w-full divide-y divide-[var(--tf-border)] text-sm">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Name</th>
+                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Email</th>
+                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Created</th>
+                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--tf-border)] bg-white">
+                    {subAdmins.map((subAdmin) => (
+                      <tr key={subAdmin.id}>
+                        <td className="px-3 py-2 text-slate-700">{subAdmin.name}</td>
+                        <td className="px-3 py-2 text-slate-700">{subAdmin.email}</td>
+                        <td className="px-3 py-2 text-slate-500">
+                          {subAdmin.createdAt ? new Date(subAdmin.createdAt).toLocaleString() : "N/A"}
+                        </td>
+                        <td className="px-3 py-2">
+                          <button
+                            className="inline-flex items-center justify-center rounded-md border border-red-200 p-1.5 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            type="button"
+                            onClick={() => void handleDeleteSubAdmin(subAdmin)}
+                            disabled={deletingSubAdminId !== null || creatingSubAdmin || loadingSubAdmins}
+                            aria-label={`Delete ${subAdmin.name}`}
+                            title={`Delete ${subAdmin.name}`}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-slate-500">No sub-admins found.</p>
+            )}
+          </div>
+        </article>
+      )}
 
       <article className="tf-section-card">
         <h2 className="mb-1.5 flex items-center gap-2 text-xl font-bold leading-none text-[var(--tf-navy)]">
@@ -530,6 +813,22 @@ export const SettingsView = ({
           />
         </div>
 
+        {isSuperAdmin ? (
+          <div className="mt-4">
+            <button
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              type="button"
+              onClick={() => void handleDeleteAllData()}
+              disabled={importing || deletingData}
+            >
+              <Trash2 size={14} />
+              {deletingData ? "Deleting..." : "Delete All Data"}
+            </button>
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-slate-500">Delete all data is available only to super admin.</p>
+        )}
+
         {dataMessage && (
           <p
             className={`mt-3 text-sm ${
@@ -540,18 +839,6 @@ export const SettingsView = ({
           </p>
         )}
       </article>
-
-      <div className="mt-3">
-          <button
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-            type="button"
-            onClick={() => void handleDeleteAllData()}
-            disabled={importing || deletingData}
-          >
-            <Trash2 size={14} />
-            {deletingData ? "Deleting..." : "Delete All Data"}
-          </button>
-        </div>
     </section>
   );
 };

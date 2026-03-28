@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, RefreshCcw, Share2, Printer, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, Filter, RefreshCcw, Share2, Printer, X } from "lucide-react";
 import { PaginationControls } from "../common/PaginationControls";
 import { CAMPAIGN_OPTIONS } from "../../data/form-options";
 import { printDonationReceipt, shareDonationReceipt } from "../../services/receipt";
@@ -10,6 +10,20 @@ import type { Donation, DonationFilters, DonationInput } from "../../types/donat
 import type { Contributor } from "../../types/contributor";
 const PAGE_SIZE = 10;
 
+const toDateInputValue = (value?: string) => {
+  if (!value) {
+    return "";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 interface CollectionViewProps {
   filters: DonationFilters;
   onChangeFilters: (filters: DonationFilters) => void;
@@ -19,6 +33,7 @@ interface CollectionViewProps {
   submitting: boolean;
   activeReceiptId: string | null;
   onSubmit: (payload: DonationInput) => Promise<Donation>;
+  onPrintReceipt: (donation: Donation) => void;
   onDownloadReceipt: (donation: Donation) => void;
   onEmailReceipt: (donation: Donation) => void;
   onRefresh: () => Promise<void>;
@@ -34,6 +49,7 @@ export const CollectionView = ({
   submitting,
   activeReceiptId,
   onSubmit,
+  onPrintReceipt,
   onDownloadReceipt,
   onEmailReceipt,
   onRefresh,
@@ -43,6 +59,8 @@ export const CollectionView = ({
   const [createdDonation, setCreatedDonation] = useState<Donation | null>(null);
   const [sharingReceipt, setSharingReceipt] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedDay, setSelectedDay] = useState(() => toDateInputValue(filters.from));
+  const dateFilterInputRef = useRef<HTMLInputElement | null>(null);
   const recentDonation = donations[0] ?? null;
   const totalPages = Math.max(1, Math.ceil(donations.length / PAGE_SIZE));
   const paginatedDonations = useMemo(
@@ -53,6 +71,10 @@ export const CollectionView = ({
   useEffect(() => {
     setCurrentPage((prev) => Math.min(prev, totalPages));
   }, [totalPages]);
+
+  useEffect(() => {
+    setSelectedDay(toDateInputValue(filters.from));
+  }, [filters.from]);
 
   const closeModal = () => {
     if (submitting || sharingReceipt) {
@@ -65,6 +87,44 @@ export const CollectionView = ({
   const openModal = () => {
     setCreatedDonation(null);
     setShowDonationModal(true);
+  };
+
+  const handleOpenDateFilter = () => {
+    const input = dateFilterInputRef.current;
+    if (!input) {
+      return;
+    }
+
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
+    if (typeof pickerInput.showPicker === "function") {
+      pickerInput.showPicker();
+      return;
+    }
+
+    input.focus();
+    input.click();
+  };
+
+  const applyDateFilter = (nextDate: string) => {
+    setCurrentPage(1);
+    setSelectedDay(nextDate);
+
+    if (!nextDate) {
+      onChangeFilters({
+        ...filters,
+        from: undefined,
+        to: undefined,
+      });
+      return;
+    }
+
+    const start = new Date(`${nextDate}T00:00:00`);
+    const end = new Date(`${nextDate}T23:59:59.999`);
+    onChangeFilters({
+      ...filters,
+      from: start.toISOString(),
+      to: end.toISOString(),
+    });
   };
 
   const handleShareReceipt = async () => {
@@ -213,28 +273,55 @@ export const CollectionView = ({
                 onChangeFilters({ ...filters, search: event.target.value || undefined });
               }}
             />
-            <select
-              className="tf-input"
-              value={filters.campaign ?? "All campaigns"}
-              onChange={(event) => {
-                setCurrentPage(1);
-                onChangeFilters({
-                  ...filters,
-                  campaign: event.target.value === "All campaigns" ? undefined : event.target.value,
-                });
-              }}
-            >
-              <option>All campaigns</option>
-              {CAMPAIGN_OPTIONS.map((campaign) => (
-                <option key={campaign} value={campaign}>
-                  {campaign}
-                </option>
-              ))}
-            </select>
-            <button className="tf-btn-outline" type="button" onClick={() => void onRefresh()}>
-              <RefreshCcw size={15} />
-              Refresh
-            </button>
+            <div className="tf-collection-filter-row">
+              <select
+                className="tf-input tf-collection-campaign-select"
+                value={filters.campaign ?? "All campaigns"}
+                onChange={(event) => {
+                  setCurrentPage(1);
+                  onChangeFilters({
+                    ...filters,
+                    campaign: event.target.value === "All campaigns" ? undefined : event.target.value,
+                  });
+                }}
+              >
+                <option>All campaigns</option>
+                {CAMPAIGN_OPTIONS.map((campaign) => (
+                  <option key={campaign} value={campaign}>
+                    {campaign}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                className="tf-btn-outline tf-collection-icon-btn"
+                type="button"
+                onClick={() => void onRefresh()}
+                aria-label="Refresh collections"
+              >
+                <RefreshCcw size={15} />
+              </button>
+
+              <button
+                className={`tf-btn-outline tf-collection-icon-btn ${
+                  selectedDay ? "tf-collection-icon-btn-active" : ""
+                }`}
+                type="button"
+                onClick={handleOpenDateFilter}
+                aria-label="Filter by date"
+              >
+                <Filter size={15} />
+              </button>
+
+              <input
+                ref={dateFilterInputRef}
+                className="tf-date-filter-input"
+                type="date"
+                value={selectedDay}
+                onChange={(event) => applyDateFilter(event.target.value)}
+                aria-label="Select collection date"
+              />
+            </div>
           </div>
         </div>
 
@@ -242,6 +329,7 @@ export const CollectionView = ({
           loading={loading}
           donations={paginatedDonations}
           activeReceiptId={activeReceiptId}
+          onPrintReceipt={onPrintReceipt}
           onDownloadReceipt={onDownloadReceipt}
           onEmailReceipt={onEmailReceipt}
         />

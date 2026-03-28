@@ -1,18 +1,22 @@
 import { APP_NAV_ITEMS } from "../../data/app-navigation";
+import type { AuthUser } from "../../types/auth";
 import type { AppTab } from "../../types/ui";
 
 interface DesktopSidebarProps {
+  currentUser: AuthUser;
   activeTab: AppTab;
   onChange: (tab: AppTab) => void;
 }
 
-export const DesktopSidebar = ({ activeTab, onChange }: DesktopSidebarProps) => (
+export const DesktopSidebar = ({ currentUser, activeTab, onChange }: DesktopSidebarProps) => (
   <aside className="tf-desktop-sidebar">
     <div className="tf-user-card">
       <div className="h-8 w-8 rounded-full bg-[linear-gradient(130deg,#0b245c,#11844a)]" />
       <div>
-        <p className="text-sm font-semibold text-slate-900">Taba Foundation</p>
-        <p className="text-xs text-slate-500">Donation Management</p>
+        <p className="text-sm font-semibold text-slate-900">{currentUser.name}</p>
+        <p className="text-xs text-slate-500">
+          {currentUser.role === "superadmin" ? "Super Admin" : "Sub Admin"}
+        </p>
       </div>
     </div>
 

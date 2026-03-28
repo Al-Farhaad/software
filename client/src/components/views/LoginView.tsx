@@ -1,22 +1,26 @@
 import { useState } from "react";
 
 interface LoginViewProps {
-  onLogin: (email: string, password: string) => boolean;
+  onLogin: (email: string, password: string) => Promise<void>;
 }
 
 export const LoginView = ({ onLogin }: LoginViewProps) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const isValid = onLogin(email, password);
-    if (!isValid) {
-      setError("Wrong password or email");
-      return;
+    try {
+      setSubmitting(true);
+      await onLogin(email, password);
+      setError("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Wrong password or email");
+    } finally {
+      setSubmitting(false);
     }
-    setError("");
   };
 
   return (
@@ -33,12 +37,13 @@ export const LoginView = ({ onLogin }: LoginViewProps) => {
             <p className="text-sm text-slate-500">Sign in to continue</p>
           </div>
 
-          <form className="grid gap-3" onSubmit={handleSubmit}>
+          <form className="grid gap-3" onSubmit={(event) => void handleSubmit(event)}>
             <input
               className="tf-input"
               type="email"
               placeholder="Email"
               required
+              disabled={submitting}
               value={email}
               onChange={(event) => setEmail(event.target.value)}
             />
@@ -47,14 +52,15 @@ export const LoginView = ({ onLogin }: LoginViewProps) => {
               type="password"
               placeholder="Password"
               required
+              disabled={submitting}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />
 
             {error && <p className="text-sm font-medium text-red-600">{error}</p>}
 
-            <button className="tf-btn-purple mt-1 w-full justify-center" type="submit">
-              Login
+            <button className="tf-btn-purple mt-1 w-full justify-center" type="submit" disabled={submitting}>
+              {submitting ? "Logging in..." : "Login"}
             </button>
           </form>
         </section>

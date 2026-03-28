@@ -158,7 +158,11 @@ export const DashboardView = ({
       <article className="tf-section-card">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-[var(--tf-navy)]">Recent Collections</h2>
-          <button className="shrink-0 text-sm font-semibold text-[var(--tf-purple)]" type="button">
+          <button
+            className="shrink-0 text-sm font-semibold text-[var(--tf-purple)]"
+            type="button"
+            onClick={onCreateCollection}
+          >
             View All <ArrowRight className="inline" size={14} />
           </button>
         </div>

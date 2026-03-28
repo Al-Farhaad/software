@@ -1,25 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { RefreshCcw } from "lucide-react";
-import { TopHeader } from "./components/layout/TopHeader";
 import { BottomTabBar } from "./components/layout/BottomTabBar";
 import { DesktopSidebar } from "./components/layout/DesktopSidebar";
-import { LoginView } from "./components/views/LoginView";
-import { DashboardView } from "./components/views/DashboardView";
-import { ContributorsView } from "./components/views/ContributorsView";
+import { TopHeader } from "./components/layout/TopHeader";
 import { CollectionView } from "./components/views/CollectionView";
+import { ContributorsView } from "./components/views/ContributorsView";
+import { DashboardView } from "./components/views/DashboardView";
 import { InvestmentsView } from "./components/views/InvestmentsView";
+import { LoginView } from "./components/views/LoginView";
 import { ReportsView } from "./components/views/ReportsView";
 import { SettingsView } from "./components/views/SettingsView";
-import { validateAppLogin } from "./data/auth";
-import { useDonations } from "./hooks/useDonations";
 import { useContributors } from "./hooks/useContributors";
+import { useDonations } from "./hooks/useDonations";
 import { useInvestments } from "./hooks/useInvestments";
-import { generateDonationReceipt } from "./services/receipt";
+import { AUTH_EXPIRED_EVENT, authApi, authStorage } from "./services/api";
+import { generateDonationReceipt, printDonationReceipt } from "./services/receipt";
+import type { AuthSession, AuthUser } from "./types/auth";
 import type { Donation, DonationFilters } from "./types/donation";
 import type { AppTab } from "./types/ui";
 
-const AuthenticatedApp = () => {
+interface AuthenticatedAppProps {
+  currentUser: AuthUser;
+  onLogout: () => void;
+}
+
+const AuthenticatedApp = ({ currentUser, onLogout }: AuthenticatedAppProps) => {
   const [activeTab, setActiveTab] = useState<AppTab>("home");
   const [filters, setFilters] = useState<DonationFilters>({});
   const [activeReceiptId, setActiveReceiptId] = useState<string | null>(null);
@@ -48,8 +54,14 @@ const AuthenticatedApp = () => {
   } = useInvestments();
 
   const handleDownloadReceipt = (donation: Donation) => {
-    void generateDonationReceipt(donation).catch((error: unknown) => {
-      window.alert(error instanceof Error ? error.message : "Could not generate receipt.");
+    void generateDonationReceipt(donation).catch((requestError: unknown) => {
+      window.alert(requestError instanceof Error ? requestError.message : "Could not generate receipt.");
+    });
+  };
+
+  const handlePrintReceipt = (donation: Donation) => {
+    void printDonationReceipt(donation).catch((requestError: unknown) => {
+      window.alert(requestError instanceof Error ? requestError.message : "Could not print receipt.");
     });
   };
 
@@ -99,6 +111,7 @@ const AuthenticatedApp = () => {
             submitting={submitting}
             activeReceiptId={activeReceiptId}
             onSubmit={createDonation}
+            onPrintReceipt={handlePrintReceipt}
             onDownloadReceipt={handleDownloadReceipt}
             onEmailReceipt={handleEmailReceipt}
             onRefresh={refreshData}
@@ -130,6 +143,7 @@ const AuthenticatedApp = () => {
       case "settings":
         return (
           <SettingsView
+            currentUser={currentUser}
             contributors={contributors}
             donations={donations}
             investments={investments}
@@ -152,10 +166,14 @@ const AuthenticatedApp = () => {
 
   return (
     <div className="tf-app-shell">
-      <TopHeader onOpenSettings={() => setActiveTab("settings")} />
+      <TopHeader
+        currentUser={currentUser}
+        onOpenSettings={() => setActiveTab("settings")}
+        onLogout={onLogout}
+      />
 
       <div className="tf-app-layout">
-        <DesktopSidebar activeTab={activeTab} onChange={setActiveTab} />
+        <DesktopSidebar currentUser={currentUser} activeTab={activeTab} onChange={setActiveTab} />
 
         <main className="tf-main-surface">
           <div className="tf-main-inner">
@@ -164,7 +182,7 @@ const AuthenticatedApp = () => {
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                   {format(new Date(), "EEEE, MMMM d")}
                 </p>
-                <h2 className="text-2xl font-bold text-[var(--tf-navy)]">Hello, Taba Team</h2>
+                <h2 className="text-2xl font-bold text-[var(--tf-navy)]">Hello, {currentUser.name}</h2>
               </div>
               <button
                 className="tf-btn-outline"
@@ -206,18 +224,62 @@ const AuthenticatedApp = () => {
 };
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [session, setSession] = useState<AuthSession | null>(() => authStorage.getSession());
 
-  const handleLogin = (email: string, password: string) => {
-    const isValid = validateAppLogin(email, password);
-    if (isValid) {
-      setIsAuthenticated(true);
-      return true;
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      authStorage.clearSession();
+      setSession(null);
+    };
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => {
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session) {
+      return;
     }
-    return false;
+
+    let cancelled = false;
+    const verifySession = async () => {
+      try {
+        const user = await authApi.getCurrentUser();
+        if (cancelled) {
+          return;
+        }
+        const nextSession = { token: session.token, user };
+        authStorage.setSession(nextSession);
+        setSession(nextSession);
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        authStorage.clearSession();
+        setSession(null);
+      }
+    };
+
+    void verifySession();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.token]);
+
+  const handleLogin = async (email: string, password: string) => {
+    const nextSession = await authApi.login(email, password);
+    authStorage.setSession(nextSession);
+    setSession(nextSession);
   };
 
-  if (!isAuthenticated) {
+  const handleLogout = () => {
+    authStorage.clearSession();
+    setSession(null);
+  };
+
+  if (!session) {
     return (
       <div className="tf-app-shell">
         <LoginView onLogin={handleLogin} />
@@ -225,7 +287,7 @@ function App() {
     );
   }
 
-  return <AuthenticatedApp />;
+  return <AuthenticatedApp currentUser={session.user} onLogout={handleLogout} />;
 }
 
 export default App;
