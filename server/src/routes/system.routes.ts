@@ -10,6 +10,7 @@ import {
   updateMySignatureHandler,
 } from "../controllers/system.controller";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware";
+import { authLimiter } from "../middlewares/rate-limit.middleware";
 import { validateRequest } from "../middlewares/validate.middleware";
 import {
   createSubAdminValidator,
@@ -21,7 +22,7 @@ import {
 export const systemRouter = Router();
 
 systemRouter.get("/health", healthCheck);
-systemRouter.post("/auth/login", loginValidator, validateRequest, loginHandler);
+systemRouter.post("/auth/login", authLimiter, loginValidator, validateRequest, loginHandler);
 systemRouter.get("/auth/me", requireAuth, getCurrentUserHandler);
 systemRouter.patch(
   "/auth/me/signature",

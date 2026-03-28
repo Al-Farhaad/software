@@ -1,8 +1,10 @@
 import mongoose from "mongoose";
 import { app } from "../src/app";
 import { env } from "../src/config/env";
+import { ensureSuperAdminAccount } from "../src/services/user.service";
 
 let connectPromise: Promise<typeof mongoose> | null = null;
+let bootstrapPromise: Promise<void> | null = null;
 
 const ensureDatabaseConnection = async () => {
   if (mongoose.connection.readyState === 1) {
@@ -29,7 +31,20 @@ const ensureDatabaseConnection = async () => {
 
 export default async function handler(req: unknown, res: unknown) {
   try {
-    await ensureDatabaseConnection();
+    if (!bootstrapPromise) {
+      bootstrapPromise = (async () => {
+        await ensureDatabaseConnection();
+        await ensureSuperAdminAccount();
+      })();
+    }
+
+    try {
+      await bootstrapPromise;
+    } catch (error) {
+      bootstrapPromise = null;
+      throw error;
+    }
+
     return app(req as Parameters<typeof app>[0], res as Parameters<typeof app>[1]);
   } catch (error) {
     // eslint-disable-next-line no-console
