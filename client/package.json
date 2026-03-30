@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@fontsource/dm-sans": "^5.2.8",
+    "@fontsource/noto-nastaliq-urdu": "^5.2.8",
     "@tailwindcss/vite": "^4.2.1",
     "axios": "^1.13.6",
     "date-fns": "^4.1.0",
@@ -37,4 +38,3 @@
     "vite": "^7.3.1"
   }
 }
-

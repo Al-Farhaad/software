@@ -1,5 +1,6 @@
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
+import "@fontsource/noto-nastaliq-urdu/400.css";
 import { authStorage } from "./api";
 import type { Donation } from "../types/donation";
 import { formatDate } from "../utils/date";
@@ -27,6 +28,10 @@ const colors = {
 
 const handwritingFontFamily =
   '"Segoe Script", "Segoe Print", "Lucida Handwriting", "Bradley Hand", "Brush Script MT", "Comic Sans MS", cursive';
+const urduFontFamily = '"Noto Nastaliq Urdu", "Noto Naskh Arabic", "Segoe UI", sans-serif';
+const urduCharacterPattern = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/u;
+
+const containsUrduText = (value: string) => urduCharacterPattern.test(value);
 
 const normalizeValue = (value?: string) => (value && value.trim() ? value.trim() : "");
 
@@ -210,6 +215,9 @@ const createHandwrittenText = (
     "maxFontSize" | "minFontSize" | "align" | "verticalAlign" | "color" | "fontWeight" | "letterSpacing"
   >,
 ) => {
+  const sanitizedValue = sanitizeReceiptText(value);
+  const useUrduFont = containsUrduText(sanitizedValue);
+  const resolvedAlign = options.align ?? (useUrduFont ? "right" : "left");
   const text = document.createElement("div");
   applyStyles(text, {
     width: "100%",
@@ -217,9 +225,9 @@ const createHandwrittenText = (
     overflow: "hidden",
     display: "flex",
     justifyContent:
-      options.align === "center"
+      resolvedAlign === "center"
         ? "center"
-        : options.align === "right"
+        : resolvedAlign === "right"
           ? "flex-end"
           : "flex-start",
     alignItems:
@@ -229,17 +237,19 @@ const createHandwrittenText = (
           ? "center"
           : "flex-end",
     color: options.color ?? colors.ink,
-    fontFamily: handwritingFontFamily,
+    fontFamily: useUrduFont ? urduFontFamily : handwritingFontFamily,
     fontWeight: options.fontWeight ?? "500",
-    fontStyle: "italic",
+    fontStyle: useUrduFont ? "normal" : "italic",
     whiteSpace: "nowrap",
-    textAlign: options.align ?? "left",
-    lineHeight: "1",
-    letterSpacing: options.letterSpacing ?? "0.2px",
+    textAlign: resolvedAlign,
+    direction: useUrduFont ? "rtl" : "ltr",
+    unicodeBidi: "plaintext",
+    lineHeight: useUrduFont ? "1.1" : "1",
+    letterSpacing: options.letterSpacing ?? (useUrduFont ? "0" : "0.2px"),
   });
   text.dataset.maxFontSize = String(options.maxFontSize);
   text.dataset.minFontSize = String(options.minFontSize);
-  text.textContent = sanitizeReceiptText(value);
+  text.textContent = sanitizedValue;
   return text;
 };
 
